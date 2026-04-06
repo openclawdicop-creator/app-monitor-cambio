@@ -246,13 +246,18 @@ createApp({
       const diferencaLiquidaBRL = diferencaBRL - valorTaxaCompra - valorTaxaVenda;
       const diferencaLiquidaPct = (diferencaLiquidaBRL / exchangeValorBRL.value) * 100;
 
+      const diferencaUSD = diferencaBRL / menorCompra.compra;
+      const diferencaLiquidaUSD = diferencaLiquidaBRL / menorCompra.compra;
+
       return {
         menorCompra,
         maiorVenda,
         diferencaBRL,
         diferencaPct,
         diferencaLiquidaBRL,
-        diferencaLiquidaPct
+        diferencaLiquidaPct,
+        diferencaUSD,
+        diferencaLiquidaUSD
       };
     });
 
@@ -337,22 +342,22 @@ createApp({
           <section class="cards" style="margin-bottom:20px" v-if="simulacaoArbitragem">
             <article class="card">
               <span class="card-label">Comprar na {{ simulacaoArbitragem.menorCompra.exchange }}</span>
-              <strong>{{ formatarMoeda(simulacaoArbitragem.menorCompra.compra, 3) }}</strong>
+              <strong>{{ inverterCotacao ? formatarMoeda(1 / simulacaoArbitragem.menorCompra.compra, 4) : formatarMoeda(simulacaoArbitragem.menorCompra.compra, 3) }}</strong>
             </article>
             <article class="card">
               <span class="card-label">Vender na {{ simulacaoArbitragem.maiorVenda.exchange }}</span>
-              <strong>{{ formatarMoeda(simulacaoArbitragem.maiorVenda.venda, 3) }}</strong>
+              <strong>{{ inverterCotacao ? formatarMoeda(1 / simulacaoArbitragem.maiorVenda.venda, 4) : formatarMoeda(simulacaoArbitragem.maiorVenda.venda, 3) }}</strong>
             </article>
             <article class="card">
               <span class="card-label">Simulacao</span>
               <div class="arb-grid">
                 <div class="arb-col" :class="simulacaoArbitragem.diferencaBRL >= 0 ? 'positivo' : 'negativo'">
                   <div class="arb-label">Bruto</div>
-                  <div class="arb-valor">R$ {{ formatarMoeda(simulacaoArbitragem.diferencaBRL, 2) }} ({{ simulacaoArbitragem.diferencaPct >= 0 ? '+' : '' }}{{ formatarNumero(simulacaoArbitragem.diferencaPct, 2) }}%)</div>
+                  <div class="arb-valor">{{ inverterCotacao ? 'USD ' + formatarMoeda(simulacaoArbitragem.diferencaUSD, 2) : 'R$ ' + formatarMoeda(simulacaoArbitragem.diferencaBRL, 2) }} ({{ simulacaoArbitragem.diferencaPct >= 0 ? '+' : '' }}{{ formatarNumero(simulacaoArbitragem.diferencaPct, 2) }}%)</div>
                 </div>
                 <div class="arb-col" :class="simulacaoArbitragem.diferencaLiquidaBRL >= 0 ? 'positivo' : 'negativo'">
                   <div class="arb-label">Liquido</div>
-                  <div class="arb-valor">R$ {{ formatarMoeda(simulacaoArbitragem.diferencaLiquidaBRL, 2) }} ({{ simulacaoArbitragem.diferencaLiquidaPct >= 0 ? '+' : '' }}{{ formatarNumero(simulacaoArbitragem.diferencaLiquidaPct, 2) }}%)</div>
+                  <div class="arb-valor">{{ inverterCotacao ? 'USD ' + formatarMoeda(simulacaoArbitragem.diferencaLiquidaUSD, 2) : 'R$ ' + formatarMoeda(simulacaoArbitragem.diferencaLiquidaBRL, 2) }} ({{ simulacaoArbitragem.diferencaLiquidaPct >= 0 ? '+' : '' }}{{ formatarNumero(simulacaoArbitragem.diferencaLiquidaPct, 2) }}%)</div>
                 </div>
               </div>
             </article>
@@ -363,8 +368,8 @@ createApp({
               <thead>
                 <tr>
                   <th>Exchange</th>
-                  <th>Compra (BRL)</th>
-                  <th>Venda (BRL)</th>
+                  <th>Compra ({{ inverterCotacao ? 'USD' : 'BRL' }})</th>
+                  <th>Venda ({{ inverterCotacao ? 'USD' : 'BRL' }})</th>
                   <th>Taxa</th>
                 </tr>
               </thead>
@@ -374,8 +379,16 @@ createApp({
                     <span class="exchange-icon">{{ getExchangeIcon(item.exchange) }}</span>
                     {{ item.exchange }}
                   </td>
-                  <td class="exchange-compra">{{ formatarMoeda(item.compra, 3) }}</td>
-                  <td class="exchange-venda">{{ formatarMoeda(item.venda, 3) }}</td>
+                  <td class="exchange-compra">
+                    {{ inverterCotacao ? formatarMoeda(1 / item.compra, 4) : formatarMoeda(item.compra, 3) }}
+                    <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(item.compra, 3) }} BRL</small>
+                    <small v-else style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(1 / item.compra, 4) }} USD</small>
+                  </td>
+                  <td class="exchange-venda">
+                    {{ inverterCotacao ? formatarMoeda(1 / item.venda, 4) : formatarMoeda(item.venda, 3) }}
+                    <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(item.venda, 3) }} BRL</small>
+                    <small v-else style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(1 / item.venda, 4) }} USD</small>
+                  </td>
                   <td class="exchange-taxa">{{ item.taxaTaker }}</td>
                 </tr>
               </tbody>
