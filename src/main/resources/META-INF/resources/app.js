@@ -149,6 +149,7 @@ createApp({
         }
 
         exchangeResultados.value = await resp.json();
+        console.log('[DEBUG] Exchanges retornadas:', exchangeResultados.value.length, exchangeResultados.value.map(e => e.exchange));
       } catch (e) {
         exchangeErro.value = e.message || "Erro ao buscar cotacoes das exchanges.";
       } finally {
@@ -211,14 +212,23 @@ createApp({
       const icons = {
         'BINANCE': '🟡',
         'BITGET': '🔵',
+        'BITMART': '🟣',
         'KUCOIN': '🟢'
       };
       return icons[exchange.toUpperCase()] || '📊';
     };
 
-    const abrirExchange = (url) => {
-      if (url) {
-        window.open(url, '_blank');
+    const abrirExchange = (exchange, url) => {
+      const urls = {
+        'BINANCE': 'https://www.binance.com/pt-BR/trade/USDT_BRL',
+        'BITGET': 'https://www.bitget.com/pt/spot/USDTBRL',
+        'BITMART': 'https://www.bitmart.com/futures/en?symbol=BRLUSDT',
+        'BYBIT': 'https://www.bybit.com/pt-BR/trade/spot/USDT/BRL',
+        'KUCOIN': 'https://www.kucoin.com/pt/trade/USDT-BRL'
+      };
+      const finalUrl = url || urls[exchange.toUpperCase()];
+      if (finalUrl) {
+        window.open(finalUrl, '_blank');
       }
     };
 
@@ -273,7 +283,7 @@ createApp({
       inverterCotacao, paridadeExibicao, valoresExibicao, formatarNumero, formatarMoeda,
       calcularConversao, inverterMoedas, toggleInverterCotacao,
       exchangeValorBRL, exchangeCarregando, exchangeErro, exchangeResultados,
-      buscarCotacoesExchanges, getExchangeIcon, simulacaoArbitragem
+      buscarCotacoesExchanges, getExchangeIcon, simulacaoArbitragem, abrirExchange
     };
   },
   template: `
@@ -298,17 +308,20 @@ createApp({
         <article class="card accent">
           <span class="card-label">Compra</span>
           <strong>{{ formatarNumero(valoresExibicao.compra) }}</strong>
-          <small>{{ paridadeExibicao }}</small>
+          <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarNumero(cotacaoAtual.venda) }} BRL</small>
+          <small v-else style="display:block; font-size:0.8em; color:#888;">{{ cotacaoAtual.compra > 0 ? formatarNumero(1 / cotacaoAtual.compra) : 0 }} USD</small>
         </article>
         <article class="card">
           <span class="card-label">Venda</span>
           <strong>{{ formatarNumero(valoresExibicao.venda) }}</strong>
-          <small>Atualizada em {{ cotacaoAtual.dataHoraCotacao }}</small>
+          <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarNumero(cotacaoAtual.compra) }} BRL</small>
+          <small v-else style="display:block; font-size:0.8em; color:#888;">{{ cotacaoAtual.venda > 0 ? formatarNumero(1 / cotacaoAtual.venda) : 0 }} USD</small>
         </article>
         <article class="card">
           <span class="card-label">Maxima</span>
           <strong>{{ formatarNumero(valoresExibicao.maxima) }}</strong>
-          <small>Minima {{ formatarNumero(valoresExibicao.minima) }}</small>
+          <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarNumero(cotacaoAtual.minima) }} BRL</small>
+          <small v-else style="display:block; font-size:0.8em; color:#888;">{{ cotacaoAtual.maxima > 0 ? formatarNumero(1 / cotacaoAtual.maxima) : 0 }} USD</small>
         </article>
         <article class="card">
           <span class="card-label">Variacao</span>
@@ -343,10 +356,14 @@ createApp({
             <article class="card">
               <span class="card-label">Comprar na {{ simulacaoArbitragem.menorCompra.exchange }}</span>
               <strong>{{ inverterCotacao ? formatarMoeda(1 / simulacaoArbitragem.menorCompra.compra, 4) : formatarMoeda(simulacaoArbitragem.menorCompra.compra, 3) }}</strong>
+              <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(simulacaoArbitragem.menorCompra.compra, 3) }} BRL</small>
+              <small v-else style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(1 / simulacaoArbitragem.menorCompra.compra, 4) }} USD</small>
             </article>
             <article class="card">
               <span class="card-label">Vender na {{ simulacaoArbitragem.maiorVenda.exchange }}</span>
               <strong>{{ inverterCotacao ? formatarMoeda(1 / simulacaoArbitragem.maiorVenda.venda, 4) : formatarMoeda(simulacaoArbitragem.maiorVenda.venda, 3) }}</strong>
+              <small v-if="inverterCotacao" style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(simulacaoArbitragem.maiorVenda.venda, 3) }} BRL</small>
+              <small v-else style="display:block; font-size:0.8em; color:#888;">{{ formatarMoeda(1 / simulacaoArbitragem.maiorVenda.venda, 4) }} USD</small>
             </article>
             <article class="card">
               <span class="card-label">Simulacao</span>
@@ -374,10 +391,11 @@ createApp({
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in exchangeResultados" :key="item.exchange" @click="abrirExchange(item.linkNegociacao)" style="cursor: pointer;">
+                <tr v-for="(item, index) in exchangeResultados" :key="item.exchange" @click="abrirExchange(item.exchange, item.linkNegociacao)" style="cursor: pointer;" :data-index="index">
                   <td class="exchange-name">
                     <span class="exchange-icon">{{ getExchangeIcon(item.exchange) }}</span>
                     {{ item.exchange }}
+                    <small v-if="item.exchange.toUpperCase() === 'BITMART'" class="text-warning" style="margin-left: 6px; font-size: 0.75em; color: #ffc107;">Futuro</small>
                   </td>
                   <td class="exchange-compra">
                     {{ inverterCotacao ? formatarMoeda(1 / item.compra, 4) : formatarMoeda(item.compra, 3) }}

@@ -416,14 +416,14 @@ button:hover {
 }
 
 .exchange-name {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   font-weight: 600;
+  vertical-align: middle;
 }
 
 .exchange-icon {
   font-size: 20px;
+  margin-right: 10px;
+  vertical-align: middle;
 }
 
 .exchange-compra,

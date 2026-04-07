@@ -2,6 +2,7 @@ package br.com.dicop.cambio.service;
 
 import br.com.dicop.cambio.client.BinanceExchangeClient;
 import br.com.dicop.cambio.client.BitgetExchangeClient;
+import br.com.dicop.cambio.client.BitmartExchangeClient;
 import br.com.dicop.cambio.client.BitprecoExchangeClient;
 import br.com.dicop.cambio.client.BybitExchangeClient;
 import br.com.dicop.cambio.client.KuCoinExchangeClient;
@@ -9,6 +10,7 @@ import br.com.dicop.cambio.client.MexcExchangeClient;
 import br.com.dicop.cambio.client.OkxExchangeClient;
 import br.com.dicop.cambio.client.dto.BinanceOrderBookResponse;
 import br.com.dicop.cambio.client.dto.BitgetOrderBookResponse;
+import br.com.dicop.cambio.client.dto.BitmartOrderBookResponse;
 import br.com.dicop.cambio.client.dto.BitprecoOrderBookResponse;
 import br.com.dicop.cambio.client.dto.BybitOrderBookResponse;
 import br.com.dicop.cambio.client.dto.KuCoinOrderBookResponse;
@@ -43,18 +45,22 @@ public class ExchangeCotacaoService {
     private static final int SCALE = 8;
     private static final String BINANCE_SYMBOL = "USDTBRL";
     private static final String BITGET_SYMBOL = "USDTBRL";
+    private static final String BITMART_SYMBOL = "BRLUSDT";
     private static final String KUCOIN_SYMBOL = "USDT-BRL";
     private static final String MEXC_SYMBOL = "BRLUSDT";
     private static final String OKX_INST_ID = "USDT-BRL";
     private static final String BYBIT_SYMBOL = "USDTBRL";
 
-    private final ExecutorService executor = Executors.newFixedThreadPool(7);
+    private final ExecutorService executor = Executors.newFixedThreadPool(8);
 
     @RestClient
     BinanceExchangeClient binanceExchangeClient;
 
     @RestClient
     BitgetExchangeClient bitgetExchangeClient;
+
+    @RestClient
+    BitmartExchangeClient bitmartExchangeClient;
 
     @RestClient
     BitprecoExchangeClient bitprecoExchangeClient;
@@ -82,6 +88,10 @@ public class ExchangeCotacaoService {
                 .supplyAsync(() -> consultarBitget(valorBRL), executor)
                 .exceptionally(throwable -> tratarFalha("Bitget", throwable));
 
+        CompletableFuture<ExchangeCotacaoResponse> bitmartFuture = CompletableFuture
+                .supplyAsync(() -> consultarBitmart(valorBRL), executor)
+                .exceptionally(throwable -> tratarFalha("Bitmart", throwable));
+
         CompletableFuture<ExchangeCotacaoResponse> bitprecoFuture = CompletableFuture
                 .supplyAsync(() -> consultarBitpreco(valorBRL), executor)
                 .exceptionally(throwable -> tratarFalha("BitPreco", throwable));
@@ -102,11 +112,12 @@ public class ExchangeCotacaoService {
                 .supplyAsync(() -> consultarBybit(valorBRL), executor)
                 .exceptionally(throwable -> tratarFalha("Bybit", throwable));
 
-        CompletableFuture.allOf(binanceFuture, bitgetFuture, bitprecoFuture, kucoinFuture, mexcFuture, okxFuture, bybitFuture).join();
+        CompletableFuture.allOf(binanceFuture, bitgetFuture, bitmartFuture, bitprecoFuture, kucoinFuture, mexcFuture, okxFuture, bybitFuture).join();
 
         List<ExchangeCotacaoResponse> cotacoes = new ArrayList<>();
         if (binanceFuture.join() != null) cotacoes.add(binanceFuture.join());
         if (bitgetFuture.join() != null) cotacoes.add(bitgetFuture.join());
+        if (bitmartFuture.join() != null) cotacoes.add(bitmartFuture.join());
         if (bitprecoFuture.join() != null) cotacoes.add(bitprecoFuture.join());
         if (kucoinFuture.join() != null) cotacoes.add(kucoinFuture.join());
         if (mexcFuture.join() != null) cotacoes.add(mexcFuture.join());
@@ -149,6 +160,39 @@ public class ExchangeCotacaoService {
             return montarCotacao("Bitget", response.data.asks, response.data.bids, valorBRL);
         } catch (Exception e) {
             LOG.warn("Falha ao consultar Bitget: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    private ExchangeCotacaoResponse consultarBitmart(BigDecimal valorBRL) {
+        try {
+            BitmartOrderBookResponse response = bitmartExchangeClient.getOrderBook(BITMART_SYMBOL);
+            if (response == null || response.data == null || response.data.asks == null || response.data.bids == null) {
+                throw new WebApplicationException("Resposta invalida da Bitmart.", Response.Status.BAD_GATEWAY);
+            }
+            
+            // A Bitmart retorna preco em USDT/BRL (invertido) para o par BRLUSDT no mercado futuro
+            // Exemplo: 0.1931 USDT por 1 BRL
+            // Para obter BRL/USD (quanto BRL por 1 USD), invertemos: 1 / 0.1931 = 5.178 BRL/USD
+            // Usar 20 niveis para Bitmart devido a menor liquidez por nivel no mercado futuro
+            // Passar asks primeiro (para compra) e bids depois (para venda), depois inverter o resultado final
+            ExchangeCotacaoResponse cotacao = montarCotacao("Bitmart", response.data.asks, response.data.bids, valorBRL, 20);
+            BigDecimal precoCompra = cotacao.compra();
+            
+            // Inverte o preco: 1 / preco_usd_brl para obter brl_usd
+            BigDecimal novaCompra = BigDecimal.ONE.divide(cotacao.venda(), SCALE, RoundingMode.HALF_UP);
+            BigDecimal novaVenda = BigDecimal.ONE.divide(cotacao.compra(), SCALE, RoundingMode.HALF_UP);
+            
+            return new ExchangeCotacaoResponse(
+                    cotacao.exchange(),
+                    novaCompra,
+                    novaVenda,
+                    cotacao.timestamp(),
+                    cotacao.linkNegociacao(),
+                    cotacao.taxaTaker()
+            );
+        } catch (Exception e) {
+            LOG.warn("Falha ao consultar Bitmart: " + e.getMessage());
             throw e;
         }
     }
@@ -255,8 +299,18 @@ public class ExchangeCotacaoService {
             List<List<String>> bids,
             BigDecimal valorBRL
     ) {
-        List<BookLevel> askLevels = converterLevels(asks);
-        List<BookLevel> bidLevels = converterLevels(bids);
+        return montarCotacao(exchange, asks, bids, valorBRL, TOP_LEVELS);
+    }
+
+    private ExchangeCotacaoResponse montarCotacao(
+            String exchange,
+            List<List<String>> asks,
+            List<List<String>> bids,
+            BigDecimal valorBRL,
+            int topLevels
+    ) {
+        List<BookLevel> askLevels = converterLevels(asks, topLevels);
+        List<BookLevel> bidLevels = converterLevels(bids, topLevels);
 
         CompraResult compra = calcularCompraPorValor(askLevels, valorBRL);
         BigDecimal venda = calcularVendaPorQuantidade(bidLevels, compra.quantidadeUsdt());
@@ -265,6 +319,8 @@ public class ExchangeCotacaoService {
         String taxaTaker;
         if (exchange.equalsIgnoreCase("MEXC")) {
             taxaTaker = "0%";  // MEXC tem taxa taker zero desde 2026
+        } else if (exchange.equalsIgnoreCase("Bitmart")) {
+            taxaTaker = "0.1%";  // Bitmart futures taxa padrao
         } else if (exchange.equalsIgnoreCase("BitPreco") || exchange.equalsIgnoreCase("BitPreço") || exchange.equalsIgnoreCase("Bity")) {
             taxaTaker = "0.2%";
         } else {
@@ -285,6 +341,7 @@ public class ExchangeCotacaoService {
         return switch (exchange) {
             case "Binance" -> "https://www.binance.com/pt/trade/USDT_BRL";
             case "Bitget" -> "https://www.bitget.com/spot/USDTBRL";
+            case "Bitmart" -> "https://www.bitmart.com/futures/en?symbol=BRLUSDT";
             case "BitPreco" -> "https://bity.com.br/";
             case "KuCoin" -> "https://www.kucoin.com/trade/USDT-BRL";
             case "MEXC" -> "https://www.mexc.com/exchange/BRL_USDT";
@@ -315,7 +372,7 @@ public class ExchangeCotacaoService {
 
         if (quantidadeComprada.compareTo(BigDecimal.ZERO) <= 0 || restante.compareTo(BigDecimal.ZERO) > 0) {
             throw new WebApplicationException(
-                    "Liquidez insuficiente nas 5 primeiras ordens de compra.",
+                    "Liquidez insuficiente nas ordens de compra.",
                     Response.Status.BAD_GATEWAY
             );
         }
@@ -344,7 +401,7 @@ public class ExchangeCotacaoService {
 
         if (totalVendido.compareTo(BigDecimal.ZERO) <= 0 || restante.compareTo(BigDecimal.ZERO) > 0) {
             throw new WebApplicationException(
-                    "Liquidez insuficiente nas 5 primeiras ordens de venda.",
+                    "Liquidez insuficiente nas ordens de venda.",
                     Response.Status.BAD_GATEWAY
             );
         }
@@ -353,12 +410,16 @@ public class ExchangeCotacaoService {
     }
 
     private List<BookLevel> converterLevels(List<List<String>> rawLevels) {
+        return converterLevels(rawLevels, TOP_LEVELS);
+    }
+
+    private List<BookLevel> converterLevels(List<List<String>> rawLevels, int topLevels) {
         if (rawLevels == null || rawLevels.isEmpty()) {
             throw new WebApplicationException("Order book vazio.", Response.Status.BAD_GATEWAY);
         }
 
         List<BookLevel> levels = new ArrayList<>();
-        for (List<String> rawLevel : rawLevels.stream().limit(TOP_LEVELS).toList()) {
+        for (List<String> rawLevel : rawLevels.stream().limit(topLevels).toList()) {
             if (rawLevel == null || rawLevel.size() < 2) {
                 continue;
             }
